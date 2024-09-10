@@ -20,7 +20,7 @@ import torch.nn as nn
 
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.loaders import FromOriginalModelMixin, PeftAdapterMixin
-from diffusers.models.attention import JointTransformerBlock
+# from diffusers.models.attention import JointTransformerBlock
 from diffusers.models.attention_processor import Attention, AttentionProcessor, FusedJointAttnProcessor2_0
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import AdaLayerNormContinuous
@@ -29,19 +29,19 @@ from diffusers.utils import USE_PEFT_BACKEND, is_torch_version, logging, scale_l
 
 from dataclasses import dataclass
 
-from animatediff.models.transformer_block import PatchEmbed3D
+# from animatediff.models.transformer_block import PatchEmbed3D
+from animatediff.models.attention_sd3 import JointTransformerBlock
 
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 
-
 @dataclass
-class Transformer2DModelOutput(BaseOutput):
+class Transformer3DModelOutput(BaseOutput):
     sample: "torch.Tensor"  # noqa: F821
 
 
-class SD3Transformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOriginalModelMixin):
+class SD3Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOriginalModelMixin):
     """
     The Transformer model introduced in Stable Diffusion 3.
 
@@ -78,13 +78,15 @@ class SD3Transformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOrigi
         pooled_projection_dim: int = 2048,
         out_channels: int = 16,
         pos_embed_max_size: int = 96,
+
+        use_temporal_attention=None,
     ):
         super().__init__()
         default_out_channels = in_channels
         self.out_channels = out_channels if out_channels is not None else default_out_channels
         self.inner_dim = self.config.num_attention_heads * self.config.attention_head_dim
 
-        self.pos_embed = PatchEmbed3D(
+        self.pos_embed = PatchEmbed(
             height=self.config.sample_size,
             width=self.config.sample_size,
             patch_size=self.config.patch_size,
@@ -106,6 +108,7 @@ class SD3Transformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOrigi
                     num_attention_heads=self.config.num_attention_heads,
                     attention_head_dim=self.config.attention_head_dim,
                     context_pre_only=i == num_layers - 1,
+                    use_temporal_attention=use_temporal_attention
                 )
                 for i in range(self.config.num_layers)
             ]
@@ -271,9 +274,9 @@ class SD3Transformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOrigi
         block_controlnet_hidden_states: List = None,
         joint_attention_kwargs: Optional[Dict[str, Any]] = None,
         return_dict: bool = True,
-    ) -> Union[torch.FloatTensor, Transformer2DModelOutput]:
+    ) -> Union[torch.FloatTensor, Transformer3DModelOutput]:
         """
-        The [`SD3Transformer2DModel`] forward method.
+        The [`SD3Transformer3DModel`] forward method.
 
         Args:
             hidden_states (`torch.FloatTensor` of shape `(batch size, channel, height, width)`):
@@ -312,7 +315,9 @@ class SD3Transformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOrigi
                 logger.warning(
                     "Passing `scale` via `joint_attention_kwargs` when not using the PEFT backend is ineffective."
                 )
-
+        assert hidden_states.dim() == 5, f"Expected hidden_states to have ndim=5, but got ndim={hidden_states.dim()}."
+        video_length = hidden_states.shape[2]
+        hidden_states = rearrange(hidden_states, "b c f h w -> (b f) c h w")
         height, width = hidden_states.shape[-2:]
 
         hidden_states = self.pos_embed(hidden_states)  # takes care of adding positional embeddings too.
@@ -373,4 +378,84 @@ class SD3Transformer2DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOrigi
         if not return_dict:
             return (output,)
 
-        return Transformer2DModelOutput(sample=output)
+        return Transformer3DModelOutput(sample=output)
+
+    @classmethod
+    def from_pretrained_2d(cls, pretrained_model_name_or_path, **kwargs):
+        from diffusers import __version__
+        from diffusers.utils import SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME, is_safetensors_available, _get_model_file
+        from diffusers.models.model_loading_utils import load_state_dict
+        print(f"loaded 3D unet's pretrained weights from {pretrained_model_name_or_path} ...")
+
+        cache_dir = kwargs.pop("cache_dir", None)
+        force_download = kwargs.pop("force_download", False)
+        proxies = kwargs.pop("proxies", None)
+        local_files_only = kwargs.pop("local_files_only", None)
+        use_auth_token = kwargs.pop("use_auth_token", None)
+        revision = kwargs.pop("revision", None)
+        subfolder = kwargs.pop("subfolder", None)
+        device_map = kwargs.pop("device_map", None)
+
+        user_agent = {
+            "diffusers": __version__,
+            "file_type": "model",
+            "framework": "pytorch",
+        }
+
+        model_file = None
+        if is_safetensors_available():
+            try:
+                model_file = _get_model_file(
+                    pretrained_model_name_or_path,
+                    weights_name=SAFETENSORS_WEIGHTS_NAME,
+                    cache_dir=cache_dir,
+                    force_download=force_download,
+                    proxies=proxies,
+                    local_files_only=local_files_only,
+                    use_auth_token=use_auth_token,
+                    revision=revision,
+                    subfolder=subfolder,
+                    user_agent=user_agent,
+                )
+            except:
+                pass
+
+        if model_file is None:
+            model_file = _get_model_file(
+                pretrained_model_name_or_path,
+                weights_name=WEIGHTS_NAME,
+                cache_dir=cache_dir,
+                force_download=force_download,
+                proxies=proxies,
+                local_files_only=local_files_only,
+                use_auth_token=use_auth_token,
+                revision=revision,
+                subfolder=subfolder,
+                user_agent=user_agent,
+            )
+
+        config, unused_kwargs = cls.load_config(
+            pretrained_model_name_or_path,
+            cache_dir=cache_dir,
+            return_unused_kwargs=True,
+            proxies=proxies,
+            local_files_only=local_files_only,
+            use_auth_token=use_auth_token,
+            revision=revision,
+            subfolder=subfolder,
+            device_map=device_map,
+            **kwargs,
+        )
+
+        config["_class_name"] = cls.__name__
+
+        model = cls.from_config(config, **unused_kwargs)
+        state_dict = load_state_dict(model_file)
+
+        m, u = model.load_state_dict(state_dict, strict=False)
+        print(f"### missing keys: {len(m)}; \n### unexpected keys: {len(u)};")
+        
+        params = [p.numel() if "motion_modules." in n else 0 for n, p in model.named_parameters()]
+        print(f"### Motion Module Parameters: {sum(params) / 1e6} M")
+        
+        return model
