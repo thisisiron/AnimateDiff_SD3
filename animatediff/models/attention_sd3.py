@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import torch
 import torch.nn.functional as F
 from torch import nn
+from einops import rearrange, repeat
 
 from diffusers.utils import deprecate, logging
 from diffusers.utils.torch_utils import maybe_allow_in_graph
@@ -116,7 +117,6 @@ class JointTransformerBlock(nn.Module):
                 heads=num_attention_heads,
                 out_dim=dim,
                 bias=True,
-                processor=processor,
             )
             nn.init.zeros_(self.attn_temp.to_out[0].weight.data)
             self.norm_temp = nn.LayerNorm(dim)

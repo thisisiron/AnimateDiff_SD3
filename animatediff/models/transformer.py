@@ -18,9 +18,11 @@ from typing import Any, Dict, List, Optional, Union
 import torch
 import torch.nn as nn
 
+from einops import rearrange, repeat
+
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.loaders import FromOriginalModelMixin, PeftAdapterMixin
-# from diffusers.models.attention import JointTransformerBlock
+from diffusers.models.attention import JointTransformerBlock
 from diffusers.models.attention_processor import Attention, AttentionProcessor, FusedJointAttnProcessor2_0
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import AdaLayerNormContinuous
@@ -315,6 +317,7 @@ class SD3Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOrigi
                 logger.warning(
                     "Passing `scale` via `joint_attention_kwargs` when not using the PEFT backend is ineffective."
                 )
+
         assert hidden_states.dim() == 5, f"Expected hidden_states to have ndim=5, but got ndim={hidden_states.dim()}."
         video_length = hidden_states.shape[2]
         hidden_states = rearrange(hidden_states, "b c f h w -> (b f) c h w")
@@ -323,6 +326,7 @@ class SD3Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOrigi
         hidden_states = self.pos_embed(hidden_states)  # takes care of adding positional embeddings too.
         temb = self.time_text_embed(timestep, pooled_projections)
         encoder_hidden_states = self.context_embedder(encoder_hidden_states)
+        encoder_hidden_states = repeat(encoder_hidden_states, 'b n c -> (b f) n c', f=video_length)
 
         for index_block, block in enumerate(self.transformer_blocks):
             if self.training and self.gradient_checkpointing:
@@ -342,12 +346,13 @@ class SD3Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOrigi
                     hidden_states,
                     encoder_hidden_states,
                     temb,
+                    video_length,
                     **ckpt_kwargs,
                 )
 
             else:
                 encoder_hidden_states, hidden_states = block(
-                    hidden_states=hidden_states, encoder_hidden_states=encoder_hidden_states, temb=temb
+                    hidden_states=hidden_states, encoder_hidden_states=encoder_hidden_states, temb=temb, video_length=video_length,
                 )
 
             # controlnet residual
@@ -371,6 +376,8 @@ class SD3Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOrigi
             shape=(hidden_states.shape[0], self.out_channels, height * patch_size, width * patch_size)
         )
 
+        output = rearrange(output, "(b f) c h w -> b c f h w", f=video_length)
+
         if USE_PEFT_BACKEND:
             # remove `lora_scale` from each PEFT layer
             unscale_lora_layers(self, lora_scale)
@@ -381,11 +388,11 @@ class SD3Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOrigi
         return Transformer3DModelOutput(sample=output)
 
     @classmethod
-    def from_pretrained_2d(cls, pretrained_model_name_or_path, **kwargs):
+    def from_pretrained_2d(cls, pretrained_model_name_or_path, transformer_additional_kwargs={}, **kwargs):
         from diffusers import __version__
         from diffusers.utils import SAFETENSORS_WEIGHTS_NAME, WEIGHTS_NAME, is_safetensors_available, _get_model_file
         from diffusers.models.model_loading_utils import load_state_dict
-        print(f"loaded 3D unet's pretrained weights from {pretrained_model_name_or_path} ...")
+        print(f"loaded 2D transformer's pretrained weights from {pretrained_model_name_or_path} ...")
 
         cache_dir = kwargs.pop("cache_dir", None)
         force_download = kwargs.pop("force_download", False)
@@ -449,7 +456,7 @@ class SD3Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOrigi
 
         config["_class_name"] = cls.__name__
 
-        model = cls.from_config(config, **unused_kwargs)
+        model = cls.from_config(config, **unused_kwargs, **transformer_additional_kwargs)
         state_dict = load_state_dict(model_file)
 
         m, u = model.load_state_dict(state_dict, strict=False)
