@@ -325,6 +325,7 @@ class SD3Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOrigi
 
         hidden_states = self.pos_embed(hidden_states)  # takes care of adding positional embeddings too.
         temb = self.time_text_embed(timestep, pooled_projections)
+        temb = repeat(temb, 'b c -> (b f) c', f=video_length)
         encoder_hidden_states = self.context_embedder(encoder_hidden_states)
         encoder_hidden_states = repeat(encoder_hidden_states, 'b n c -> (b f) n c', f=video_length)
 
