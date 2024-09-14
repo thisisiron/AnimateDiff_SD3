@@ -27,6 +27,7 @@ from diffusers.models.attention_processor import Attention, AttentionProcessor, 
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import AdaLayerNormContinuous
 from diffusers.models.embeddings import CombinedTimestepTextProjEmbeddings, PatchEmbed
+from diffusers.models.transformers import TransformerTemporalModel
 from diffusers.utils import USE_PEFT_BACKEND, is_torch_version, logging, scale_lora_layers, unscale_lora_layers, BaseOutput
 
 from dataclasses import dataclass
@@ -82,6 +83,9 @@ class SD3Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOrigi
         pos_embed_max_size: int = 96,
 
         use_temporal_attention=None,
+        use_motion_module=None,
+        motion_module_type=None,
+        motion_module_kwargs=None,
     ):
         super().__init__()
         default_out_channels = in_channels
@@ -111,6 +115,16 @@ class SD3Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOrigi
                     attention_head_dim=self.config.attention_head_dim,
                     context_pre_only=i == num_layers - 1,
                     use_temporal_attention=use_temporal_attention
+                )
+                for i in range(self.config.num_layers)
+            ]
+        )
+
+        self.motion_modules = nn.ModuleList(
+            [
+                TransformerTemporalModel(
+                    in_channels=self.inner_dim,
+                    **motion_module_kwargs
                 )
                 for i in range(self.config.num_layers)
             ]
@@ -323,13 +337,20 @@ class SD3Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOrigi
         hidden_states = rearrange(hidden_states, "b c f h w -> (b f) c h w")
         height, width = hidden_states.shape[-2:]
 
+        # unpatchify
+        patch_size = self.config.patch_size
+        height = height // patch_size
+        width = width // patch_size
+
+
         hidden_states = self.pos_embed(hidden_states)  # takes care of adding positional embeddings too.
         temb = self.time_text_embed(timestep, pooled_projections)
-        temb = repeat(temb, 'b c -> (b f) c', f=video_length)
         encoder_hidden_states = self.context_embedder(encoder_hidden_states)
+
+        temb = repeat(temb, 'b c -> (b f) c', f=video_length)
         encoder_hidden_states = repeat(encoder_hidden_states, 'b n c -> (b f) n c', f=video_length)
 
-        for index_block, block in enumerate(self.transformer_blocks):
+        for index_block, (block, motion_module) in enumerate(zip(self.transformer_blocks, self.motion_modules)):
             if self.training and self.gradient_checkpointing:
 
                 def create_custom_forward(module, return_dict=None):
@@ -355,6 +376,14 @@ class SD3Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOrigi
                 encoder_hidden_states, hidden_states = block(
                     hidden_states=hidden_states, encoder_hidden_states=encoder_hidden_states, temb=temb, video_length=video_length,
                 )
+                if motion_module is not None:
+                    hidden_states = rearrange(hidden_states, "(b f) (h w) c -> (b f) c h w", h=height, w=width, f=video_length)
+                    hidden_states = motion_module(
+                            hidden_states, 
+                            timestep=timestep, 
+                            num_frames=video_length,
+                    ).sample
+                    hidden_states = rearrange(hidden_states, "(b f) c h w -> (b f) (h w) c", h=height, w=width, f=video_length)
 
             # controlnet residual
             if block_controlnet_hidden_states is not None and block.context_pre_only is False:
@@ -363,11 +392,6 @@ class SD3Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOrigi
 
         hidden_states = self.norm_out(hidden_states, temb)
         hidden_states = self.proj_out(hidden_states)
-
-        # unpatchify
-        patch_size = self.config.patch_size
-        height = height // patch_size
-        width = width // patch_size
 
         hidden_states = hidden_states.reshape(
             shape=(hidden_states.shape[0], height, width, patch_size, patch_size, self.out_channels)
