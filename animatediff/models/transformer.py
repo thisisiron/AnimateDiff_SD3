@@ -22,7 +22,6 @@ from einops import rearrange, repeat
 
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.loaders import FromOriginalModelMixin, PeftAdapterMixin
-from diffusers.models.attention import JointTransformerBlock
 from diffusers.models.attention_processor import Attention, AttentionProcessor, FusedJointAttnProcessor2_0
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import AdaLayerNormContinuous
@@ -32,11 +31,14 @@ from diffusers.utils import USE_PEFT_BACKEND, is_torch_version, logging, scale_l
 
 from dataclasses import dataclass
 
-# from animatediff.models.transformer_block import PatchEmbed3D
 from animatediff.models.attention_sd3 import JointTransformerBlock
 
 
-logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
+def zero_module(module):
+    # Zero out the parameters of a module and return it.
+    for p in module.parameters():
+        p.detach().zero_()
+    return module
 
 
 @dataclass
@@ -129,6 +131,9 @@ class SD3Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOrigi
                 for i in range(self.config.num_layers)
             ]
         )
+
+        for module in self.motion_modules:
+            module.proj_out = zero_module(module.proj_out)
 
         self.norm_out = AdaLayerNormContinuous(self.inner_dim, self.inner_dim, elementwise_affine=False, eps=1e-6)
         self.proj_out = nn.Linear(self.inner_dim, patch_size * patch_size * self.out_channels, bias=True)
@@ -341,7 +346,6 @@ class SD3Transformer3DModel(ModelMixin, ConfigMixin, PeftAdapterMixin, FromOrigi
         patch_size = self.config.patch_size
         height = height // patch_size
         width = width // patch_size
-
 
         hidden_states = self.pos_embed(hidden_states)  # takes care of adding positional embeddings too.
         temb = self.time_text_embed(timestep, pooled_projections)
