@@ -358,35 +358,6 @@ def main(conf):
             transformer=transformer,
         ).to("cuda")
 
-    # samples = []
-    
-    # generator = torch.Generator(device="cuda")
-    # generator.manual_seed(conf.global_seed)
-    
-    # height = conf.train_data.sample_size[0] if not isinstance(conf.train_data.sample_size, int) else conf.train_data.sample_size
-    # width  = conf.train_data.sample_size[1] if not isinstance(conf.train_data.sample_size, int) else conf.train_data.sample_size
-
-    # prompts = conf.validation_data.prompts
-
-    # for idx, prompt in enumerate(prompts):
-    #     if not conf.image_finetune:
-    #         sample = validation_pipeline(
-    #             prompt,
-    #             generator    = generator,
-    #             video_length = conf.train_data.sample_n_frames,
-    #             height       = height,
-    #             width        = width,
-    #             **conf.validation_data,
-    #         ).videos
-    #         save_videos_grid(sample, f"{output_dir}/samples/sample-{global_step}/{idx}.gif")
-    #         samples.append(sample)
-    # import pdb;pdb.set_trace()
-    
-    # if not conf.image_finetune:
-    #     samples = torch.concat(samples)
-    #     save_path = f"{output_dir}/samples/sample-{global_step}.gif"
-    #     save_videos_grid(samples, save_path)
-
     # DDP warpper
     transformer.to(local_rank)
     if conf.distributed:
@@ -608,4 +579,4 @@ if __name__ == "__main__":
 
     conf = dist.setup_config(parser)
     conf.distributed = conf.n_gpu > 1
-    dist.run(main, conf.launch_config.nproc_per_node, conf=conf)
+    dist.run(main, conf, args=(conf,))
