@@ -22,7 +22,6 @@ from einops import rearrange, repeat
 
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.loaders import FromOriginalModelMixin, PeftAdapterMixin
-# from diffusers.models.attention import JointTransformerBlock
 from diffusers.models.attention_processor import Attention, AttentionProcessor, FusedJointAttnProcessor2_0
 from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.normalization import AdaLayerNormContinuous
@@ -32,17 +31,15 @@ from diffusers.utils import USE_PEFT_BACKEND, is_torch_version, logging, scale_l
 
 from dataclasses import dataclass
 
-# from animatediff.models.transformer_block import PatchEmbed3D
 from animatediff.models.attention_sd3 import JointTransformerBlock
 
-
-logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
 def zero_module(module):
     # Zero out the parameters of a module and return it.
     for p in module.parameters():
         p.detach().zero_()
     return module
+
 
 @dataclass
 class Transformer3DModelOutput(BaseOutput):
