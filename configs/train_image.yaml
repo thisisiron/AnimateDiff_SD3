@@ -1,0 +1,67 @@
+image_finetune: true
+name: "sd3"
+
+output_dir: "outputs"
+pretrained_model_path: "models/StableDiffusion/stable-diffusion-3-medium-diffusers/"
+
+transformer_checkpoint_path: ""
+
+train_data:
+  csv_path: "train.csv"
+  video_folder: "data/"
+  sample_size: 512 
+
+validation_data:
+  prompts:
+    - "best quality, masterpiece, 1girl, looking at viewer, blurry background, upper body, contemporary, dress"
+    - "masterpiece, best quality, 1girl, solo, cherry blossoms, hanami, pink flower, white flower, spring season, wisteria, petals, flower, plum blossoms, outdoors, falling petals, white hair, black eyes,"
+    - "best quality, masterpiece, 1boy, formal, abstract, looking at viewer, masculine, marble pattern"
+    - "best quality, masterpiece, 1girl, cloudy sky, dandelion, contrapposto, alternate hairstyle,"
+  num_inference_steps: 25
+  guidance_scale: 8.
+
+trainable_modules:
+  - "."
+
+batch_size: 2
+num_workers: 0
+
+# optimizer
+learning_rate: 1.e-5
+adam_beta1: 0.9
+adam_beta2: 0.999
+adam_weight_decay: 0.01
+adam_epsilon: 1.e-08
+
+
+# lr scheduler
+lr_scheduler: "constant"
+lr_warmup_steps: 0
+gradient_accumulation_steps: 1
+
+# grad scaler
+max_grad_norm: 1.0
+
+# noise schedluer
+precondition_outputs: 1
+weighting_scheme: "logit_normal"
+logit_mean: 0.0
+logit_std: 1.0
+mode_scale: 1.29
+
+cfg_random_null_text: true 
+cfg_random_null_text_ratio: 0.1
+
+max_train_epoch:      -1
+max_train_steps:      3200
+checkpointing_epochs: -1
+checkpointing_steps:  200
+
+validation_steps: 200
+validation_steps_tuple: []
+
+global_seed: 42
+mixed_precision: true  # bf16 fp16 fp32
+gradient_checkpointing: false
+
+is_debug: false
