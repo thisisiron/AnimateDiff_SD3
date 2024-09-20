@@ -44,7 +44,7 @@ from irontorch import distributed as dist
 from irontorch.utils import set_seed, GradScaler
 from irontorch.recorder import Logger
 
-from animatediff.data.niul import WebVid10M
+from animatediff.data.dataset import WebVid10M
 from animatediff.utils.util import save_videos_grid
 from animatediff.models.transformer import SD3Transformer3DModel
 from animatediff.pipelines.pipeline_animation import AnimationPipeline

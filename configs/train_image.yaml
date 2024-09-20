@@ -7,8 +7,8 @@ pretrained_model_path: "models/StableDiffusion/stable-diffusion-3-medium-diffuse
 transformer_checkpoint_path: ""
 
 train_data:
-  csv_path: "train.csv"
-  video_folder: "data/"
+  csv_path: "/data/video/data/train.csv"
+  video_folder: "/data/video/data/dataset/train/"
   sample_size: 512 
 
 validation_data:

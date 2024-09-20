@@ -6,7 +6,6 @@ from decord import VideoReader
 import torch
 import torchvision.transforms as transforms
 from torch.utils.data.dataset import Dataset
-from animatediff.utils.util import zero_rank_print
 
 
 class WebVid(Dataset):
