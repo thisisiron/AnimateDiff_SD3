@@ -1,6 +1,9 @@
 # AnimateDiff for SD3
 This repository is the unofficial implementation of AnimateDiff.
 
+```
+git clone https://huggingface.co/stabilityai/stable-diffusion-3-medium-diffusers
+```
 
 ## BibTeX
 ```
